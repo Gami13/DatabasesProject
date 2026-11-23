@@ -1,4 +1,7 @@
 
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
 -- ----------------------------
 -- Records of club_leagues
 -- ----------------------------
@@ -8579,3 +8582,5 @@ INSERT INTO `roles` VALUES (1, 'Administrator');
 INSERT INTO `roles` VALUES (2, 'Moderator');
 INSERT INTO `roles` VALUES (3, 'User');
 INSERT INTO `roles` VALUES (4, 'Guest');
+
+SET FOREIGN_KEY_CHECKS = 1;
