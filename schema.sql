@@ -216,7 +216,7 @@ CREATE TABLE `players_positions`  (
   `id_player` int UNSIGNED NOT NULL,
   `id_position` int UNSIGNED NOT NULL,
   `is_primary` tinyint(1) NOT NULL DEFAULT 0,
-  `primary_guard` int UNSIGNED GENERATED ALWAYS AS (case when `is_primary` = 1 then `id_player` else NULL end) VIRTUAL NULL,
+  `primary_guard` int UNSIGNED GENERATED ALWAYS AS (case when `is_primary` = 1 then `id_player` else NULL end) VIRTUAL,
   PRIMARY KEY (`id_player`, `id_position`) USING BTREE,
   UNIQUE INDEX `uq_one_primary_position_per_player`(`primary_guard` ASC) USING BTREE,
   INDEX `id_position`(`id_position` ASC) USING BTREE,
@@ -279,7 +279,7 @@ DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users`  (
   `id_user` int UNSIGNED NOT NULL AUTO_INCREMENT,
   `login` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  `password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL WITHOUT SYSTEM VERSIONING,
+  `password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
   PRIMARY KEY (`id_user`) USING BTREE,
   UNIQUE INDEX `login`(`login` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = DYNAMIC WITH SYSTEM VERSIONING;
@@ -314,13 +314,12 @@ ALTER TABLE `players` ADD SYSTEM VERSIONING;
 ALTER TABLE `games` ADD SYSTEM VERSIONING;
 ALTER TABLE `injuries` ADD SYSTEM VERSIONING;
 ALTER TABLE `comments` ADD SYSTEM VERSIONING;
+ALTER TABLE `roles` ADD SYSTEM VERSIONING;
+ALTER TABLE `user_roles` ADD SYSTEM VERSIONING;
 ALTER TABLE `comments` PARTITION BY SYSTEM_TIME (
     PARTITION p_hist HISTORY,
     PARTITION p_cur CURRENT
 );
-ALTER TABLE `roles` ADD SYSTEM VERSIONING;
--- `users` is created WITH SYSTEM VERSIONING above so `password` can be marked WITHOUT SYSTEM VERSIONING
-ALTER TABLE `user_roles` ADD SYSTEM VERSIONING;
 
 -- ----------------------------
 -- Views (drop legacy duplicates, create unified views)
