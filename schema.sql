@@ -305,181 +305,173 @@ CREATE TABLE `user_roles`  (
 -- Records of user_roles
 -- ----------------------------
 
--- ----------------------------
--- View structure for view_games_with_scores
--- ----------------------------
-DROP VIEW IF EXISTS `view_games_with_scores`;
-CREATE ALGORITHM = UNDEFINED SQL SECURITY DEFINER VIEW `view_games_with_scores` AS SELECT
-  g.`id_game`,
-  g.`id_home_club`,
-  g.`id_away_club`,
-  g.`game_date`,
-  g.`status`,
-  g.`id_league`,
-  (SELECT COUNT(*) FROM `goal_history` AS gh
-   WHERE gh.`id_game` = g.`id_game`
-     AND gh.`id_credited_club` = g.`id_home_club`) AS `home_score`,
-  (SELECT COUNT(*) FROM `goal_history` AS gh
-   WHERE gh.`id_game` = g.`id_game`
-     AND gh.`id_credited_club` = g.`id_away_club`) AS `away_score`
-FROM `games` AS g; ;
-
--- ----------------------------
--- View structure for view_players_details
--- ----------------------------
-DROP VIEW IF EXISTS `view_players_details`;
-CREATE ALGORITHM = UNDEFINED SQL SECURITY DEFINER VIEW `view_players_details` AS WITH ranked_transfers AS (
-  SELECT
-    tr.`id_player`,
-    tr.`id_to_club`,
-    ROW_NUMBER() OVER (
-      PARTITION BY tr.`id_player` ORDER BY tr.`transfer_date` DESC, tr.`id_transfer` DESC
-    ) AS transfer_rank
-  FROM `transfers` tr
-  INNER JOIN `clubs` cl ON cl.`id_club` = tr.`id_to_club`
-  WHERE tr.`transfer_date` <= CURRENT_DATE
-    AND cl.`is_national_team` = 0
-), goal_totals AS (
-  SELECT
-    `id_player`,
-    SUM(CASE WHEN `is_own_goal` = FALSE THEN 1 ELSE 0 END) AS total_goals,
-    SUM(CASE WHEN `is_own_goal` = TRUE THEN 1 ELSE 0 END) AS total_own_goals
-  FROM `goal_history`
-  GROUP BY `id_player`
-), elapsed_injuries AS (
-  SELECT
-    `id_injury`,
-    `id_player`,
-    `start_date`,
-    LEAST(COALESCE(`end_date`, CURRENT_DATE), CURRENT_DATE) AS elapsed_end_date,
-    CASE WHEN `end_date` IS NULL OR `end_date` >= CURRENT_DATE THEN 1 ELSE 0 END AS is_active
-  FROM `injuries`
-  WHERE `start_date` <= CURRENT_DATE
-), injury_ranges AS (
-  SELECT
-    `id_injury`,
-    `id_player`,
-    `start_date`,
-    `elapsed_end_date`,
-    `is_active`,
-    MAX(`elapsed_end_date`) OVER (
-      PARTITION BY `id_player` ORDER BY `start_date`, `id_injury`
-      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-    ) AS previous_end_date
-  FROM elapsed_injuries
-), injury_totals AS (
-  SELECT
-    `id_player`,
-    COUNT(*) AS total_injuries,
-    MAX(is_active) AS is_currently_injured,
-    SUM(
-      CASE
-        WHEN previous_end_date IS NULL OR `start_date` > previous_end_date
-          THEN DATEDIFF(elapsed_end_date, `start_date`) + 1
-        ELSE GREATEST(0, DATEDIFF(elapsed_end_date, previous_end_date))
-      END
-    ) AS total_days_injured
-  FROM injury_ranges
-  GROUP BY `id_player`
-)
-SELECT
-  p.`id_player`,
-  p.`name`,
-  p.`surname`,
-  pp.`id_position`,
-  pos.`position_name`,
-  pos.`position_code`,
-  p.`jersey_nr`,
-  p.`height`,
-  p.`date_of_birth`,
-  p.`id_country`,
-  country.`name_country`,
-  t.`id_to_club` AS `id_club`,
-  c.`club_name`,
-  COALESCE(g.total_goals, 0) AS total_goals,
-  COALESCE(g.total_own_goals, 0) AS total_own_goals,
-  COALESCE(i.total_injuries, 0) AS total_injuries,
-  COALESCE(i.is_currently_injured, 0) AS is_currently_injured,
-  COALESCE(i.total_days_injured, 0) AS total_days_injured
-FROM `players` AS p
-LEFT JOIN `players_positions` AS pp ON pp.`id_player` = p.`id_player` AND pp.`is_primary` = 1
-LEFT JOIN `positions` AS pos ON pos.`id_position` = pp.`id_position`
-LEFT JOIN `countries` AS country ON country.`id_country` = p.`id_country`
-LEFT JOIN ranked_transfers AS t ON t.`id_player` = p.`id_player` AND t.transfer_rank = 1
-LEFT JOIN `clubs` AS c ON c.`id_club` = t.`id_to_club`
-LEFT JOIN goal_totals AS g ON g.`id_player` = p.`id_player`
-LEFT JOIN injury_totals AS i ON i.`id_player` = p.`id_player` ;
-
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 1. Włączenie wersjonowania systemowego
-ALTER TABLE players ADD SYSTEM VERSIONING;
-ALTER TABLE games ADD SYSTEM VERSIONING;
-ALTER TABLE injuries ADD SYSTEM VERSIONING;
-ALTER TABLE comments ADD SYSTEM VERSIONING;
-ALTER TABLE comments PARTITION BY SYSTEM_TIME (
+-- ----------------------------
+-- System versioning & partitioning
+-- ----------------------------
+ALTER TABLE `players` ADD SYSTEM VERSIONING;
+ALTER TABLE `games` ADD SYSTEM VERSIONING;
+ALTER TABLE `injuries` ADD SYSTEM VERSIONING;
+ALTER TABLE `comments` ADD SYSTEM VERSIONING;
+ALTER TABLE `comments` PARTITION BY SYSTEM_TIME (
     PARTITION p_hist HISTORY,
     PARTITION p_cur CURRENT
 );
 
--- 2. Utworzenie / aktualizacja widoków
-CREATE OR REPLACE VIEW v_match_results AS
+-- ----------------------------
+-- Views (drop legacy duplicates, create unified views)
+-- ----------------------------
+DROP VIEW IF EXISTS `view_games_with_scores`;
+DROP VIEW IF EXISTS `view_players_details`;
+DROP VIEW IF EXISTS `v_player_career_stats`;
+
+CREATE OR REPLACE VIEW `v_match_results` AS
 SELECT
-    g.id_game,
-    l.league_name,
-    g.game_date,
-    c_home.club_name AS home_team,
-    COALESCE(SUM(CASE WHEN gh.id_credited_club = g.id_home_club THEN 1 ELSE 0 END), 0) AS home_goals,
-    COALESCE(SUM(CASE WHEN gh.id_credited_club = g.id_away_club THEN 1 ELSE 0 END), 0) AS away_goals,
-    c_away.club_name AS away_team,
-    g.status
-FROM games g
-JOIN clubs c_home ON g.id_home_club = c_home.id_club
-JOIN clubs c_away ON g.id_away_club = c_away.id_club
-JOIN leagues l ON g.id_league = l.id_league
-LEFT JOIN goal_history gh ON g.id_game = gh.id_game
+    g.`id_game`,
+    g.`id_league`,
+    l.`league_name`,
+    g.`game_date`,
+    g.`id_home_club`,
+    c_home.`club_name` AS `home_club_name`,
+    COALESCE(SUM(CASE WHEN gh.`id_credited_club` = g.`id_home_club` THEN 1 ELSE 0 END), 0) AS `home_goals`,
+    COALESCE(SUM(CASE WHEN gh.`id_credited_club` = g.`id_away_club` THEN 1 ELSE 0 END), 0) AS `away_goals`,
+    g.`id_away_club`,
+    c_away.`club_name` AS `away_club_name`,
+    g.`status`
+FROM `games` AS g
+JOIN `clubs` AS c_home ON g.`id_home_club` = c_home.`id_club`
+JOIN `clubs` AS c_away ON g.`id_away_club` = c_away.`id_club`
+JOIN `leagues` AS l ON g.`id_league` = l.`id_league`
+LEFT JOIN `goal_history` AS gh ON g.`id_game` = gh.`id_game`
 GROUP BY
-    g.id_game, l.league_name, g.game_date,
-    c_home.club_name, c_away.club_name, g.status;
+    g.`id_game`,
+    g.`id_league`,
+    l.`league_name`,
+    g.`game_date`,
+    g.`id_home_club`,
+    c_home.`club_name`,
+    g.`id_away_club`,
+    c_away.`club_name`,
+    g.`status`;
 
-CREATE OR REPLACE VIEW v_top_scorers AS
+CREATE OR REPLACE VIEW `v_player_details` AS
+WITH ranked_transfers AS (
+    SELECT
+        tr.`id_player`,
+        tr.`id_to_club`,
+        ROW_NUMBER() OVER (
+            PARTITION BY tr.`id_player` ORDER BY tr.`transfer_date` DESC, tr.`id_transfer` DESC
+        ) AS `transfer_rank`
+    FROM `transfers` AS tr
+    LEFT JOIN `clubs` AS cl ON cl.`id_club` = tr.`id_to_club`
+    WHERE tr.`transfer_date` <= CURRENT_DATE
+      AND (tr.`id_to_club` IS NULL OR cl.`is_national_team` = 0)
+), lineup_totals AS (
+    SELECT
+        `id_player`,
+        COUNT(DISTINCT `id_game`) AS `matches_played`,
+        COALESCE(SUM(`is_starting`), 0) AS `starting_appearances`
+    FROM `game_lineups`
+    GROUP BY `id_player`
+), goal_totals AS (
+    SELECT
+        `id_player`,
+        SUM(CASE WHEN `is_own_goal` = FALSE THEN 1 ELSE 0 END) AS `total_goals`,
+        SUM(CASE WHEN `is_own_goal` = TRUE THEN 1 ELSE 0 END) AS `total_own_goals`
+    FROM `goal_history`
+    GROUP BY `id_player`
+), elapsed_injuries AS (
+    SELECT
+        `id_injury`,
+        `id_player`,
+        `start_date`,
+        LEAST(COALESCE(`end_date`, CURRENT_DATE), CURRENT_DATE) AS `elapsed_end_date`,
+        CASE WHEN `end_date` IS NULL OR `end_date` >= CURRENT_DATE THEN 1 ELSE 0 END AS `is_active`
+    FROM `injuries`
+    WHERE `start_date` <= CURRENT_DATE
+), injury_ranges AS (
+    SELECT
+        `id_injury`,
+        `id_player`,
+        `start_date`,
+        `elapsed_end_date`,
+        `is_active`,
+        MAX(`elapsed_end_date`) OVER (
+            PARTITION BY `id_player` ORDER BY `start_date`, `id_injury`
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+        ) AS `previous_end_date`
+    FROM elapsed_injuries
+), injury_totals AS (
+    SELECT
+        `id_player`,
+        COUNT(*) AS `total_injuries`,
+        MAX(`is_active`) AS `is_currently_injured`,
+        SUM(
+            CASE
+                WHEN `previous_end_date` IS NULL OR `start_date` > `previous_end_date`
+                    THEN DATEDIFF(`elapsed_end_date`, `start_date`) + 1
+                ELSE GREATEST(0, DATEDIFF(`elapsed_end_date`, `previous_end_date`))
+            END
+        ) AS `total_days_injured`
+    FROM injury_ranges
+    GROUP BY `id_player`
+)
 SELECT
-    p.id_player,
-    p.name,
-    p.surname,
-    co.name_country AS nationality,
-    COUNT(gh.id_goal_history) AS goals_scored
-FROM players p
-JOIN goal_history gh ON p.id_player = gh.id_player
-LEFT JOIN countries co ON p.id_country = co.id_country
-WHERE gh.is_own_goal = 0
-GROUP BY p.id_player, p.name, p.surname, co.name_country
-ORDER BY goals_scored DESC;
+    p.`id_player`,
+    p.`name`,
+    p.`surname`,
+    pp.`id_position`,
+    pos.`position_name`,
+    pos.`position_code`,
+    p.`jersey_nr`,
+    p.`height`,
+    p.`date_of_birth`,
+    p.`id_country`,
+    country.`name_country`,
+    t.`id_to_club` AS `id_club`,
+    c.`club_name`,
+    COALESCE(l.`matches_played`, 0) AS `matches_played`,
+    COALESCE(l.`starting_appearances`, 0) AS `starting_appearances`,
+    COALESCE(g.`total_goals`, 0) AS `total_goals`,
+    COALESCE(g.`total_own_goals`, 0) AS `total_own_goals`,
+    COALESCE(i.`total_injuries`, 0) AS `total_injuries`,
+    COALESCE(i.`is_currently_injured`, 0) AS `is_currently_injured`,
+    COALESCE(i.`total_days_injured`, 0) AS `total_days_injured`
+FROM `players` AS p
+LEFT JOIN `players_positions` AS pp ON pp.`id_player` = p.`id_player` AND pp.`is_primary` = 1
+LEFT JOIN `positions` AS pos ON pos.`id_position` = pp.`id_position`
+LEFT JOIN `countries` AS country ON country.`id_country` = p.`id_country`
+LEFT JOIN ranked_transfers AS t ON t.`id_player` = p.`id_player` AND t.`transfer_rank` = 1
+LEFT JOIN `clubs` AS c ON c.`id_club` = t.`id_to_club`
+LEFT JOIN lineup_totals AS l ON l.`id_player` = p.`id_player`
+LEFT JOIN goal_totals AS g ON g.`id_player` = p.`id_player`
+LEFT JOIN injury_totals AS i ON i.`id_player` = p.`id_player`;
 
-CREATE OR REPLACE VIEW v_active_injuries AS
+CREATE OR REPLACE VIEW `v_top_scorers` AS
 SELECT
-    p.id_player,
-    CONCAT(p.name, ' ', COALESCE(p.surname, '')) AS player_name,
-    i.description AS injury_description,
-    i.start_date,
-    i.end_date,
-    DATEDIFF(COALESCE(i.end_date, CURDATE()), i.start_date) AS days_out
-FROM injuries i
-JOIN players p ON i.id_player = p.id_player
-WHERE i.end_date IS NULL OR i.end_date >= CURDATE();
+    p.`id_player`,
+    p.`name`,
+    p.`surname`,
+    co.`name_country` AS `nationality`,
+    COUNT(gh.`id_goal_history`) AS `goals_scored`
+FROM `players` AS p
+JOIN `goal_history` AS gh ON p.`id_player` = gh.`id_player`
+LEFT JOIN `countries` AS co ON p.`id_country` = co.`id_country`
+WHERE gh.`is_own_goal` = 0
+GROUP BY p.`id_player`, p.`name`, p.`surname`, co.`name_country`;
 
-CREATE OR REPLACE VIEW v_player_career_stats AS
+CREATE OR REPLACE VIEW `v_active_injuries` AS
 SELECT
-    p.id_player,
-    p.name,
-    p.surname,
-    COUNT(DISTINCT gl.id_game) AS matches_played,
-    COALESCE(SUM(gl.is_starting), 0) AS starting_appearances,
-    (
-        SELECT COUNT(*)
-        FROM goal_history gh
-        WHERE gh.id_player = p.id_player AND gh.is_own_goal = 0
-    ) AS total_goals
-FROM players p
-LEFT JOIN game_lineups gl ON p.id_player = gl.id_player
-GROUP BY p.id_player, p.name, p.surname;
+    i.`id_injury`,
+    p.`id_player`,
+    CONCAT_WS(' ', p.`name`, p.`surname`) AS `player_name`,
+    i.`description` AS `injury_description`,
+    i.`start_date`,
+    i.`end_date`,
+    DATEDIFF(CURDATE(), i.`start_date`) AS `days_elapsed`,
+    DATEDIFF(i.`end_date`, CURDATE()) AS `expected_days_remaining`
+FROM `injuries` AS i
+JOIN `players` AS p ON i.`id_player` = p.`id_player`
+WHERE i.`start_date` <= CURDATE()
+  AND (i.`end_date` IS NULL OR i.`end_date` >= CURDATE());
