@@ -8570,3 +8570,12 @@ INSERT INTO `transfers` VALUES (989, 220, NULL, 1045, '2016-02-21', NULL);
 INSERT INTO `transfers` VALUES (990, 220, 1045, 111, '2018-07-01', 3200000);
 INSERT INTO `transfers` VALUES (991, 220, 111, 106, '2022-01-28', 83500000);
 INSERT INTO `transfers` VALUES (992, 213, 42, 39, '2025-09-01', 145000000);
+
+
+-- ----------------------------
+-- Records of roles
+-- ----------------------------
+INSERT INTO `roles` VALUES (1, 'Administrator');
+INSERT INTO `roles` VALUES (2, 'Moderator');
+INSERT INTO `roles` VALUES (3, 'User');
+INSERT INTO `roles` VALUES (4, 'Guest');

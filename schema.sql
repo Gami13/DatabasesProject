@@ -271,13 +271,6 @@ CREATE TABLE `roles`  (
   UNIQUE INDEX `uq_role`(`role` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 5 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = DYNAMIC;
 
--- ----------------------------
--- Records of roles
--- ----------------------------
-INSERT INTO `roles` VALUES (1, 'Administrator');
-INSERT INTO `roles` VALUES (2, 'Moderator');
-INSERT INTO `roles` VALUES (3, 'User');
-INSERT INTO `roles` VALUES (4, 'Guest');
 
 -- ----------------------------
 -- Table structure for users
