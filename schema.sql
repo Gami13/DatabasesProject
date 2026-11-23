@@ -279,10 +279,10 @@ DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users`  (
   `id_user` int UNSIGNED NOT NULL AUTO_INCREMENT,
   `login` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  `password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  `password` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL WITHOUT SYSTEM VERSIONING,
   PRIMARY KEY (`id_user`) USING BTREE,
   UNIQUE INDEX `login`(`login` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = DYNAMIC WITH SYSTEM VERSIONING;
 
 -- ----------------------------
 -- Records of users
@@ -318,6 +318,9 @@ ALTER TABLE `comments` PARTITION BY SYSTEM_TIME (
     PARTITION p_hist HISTORY,
     PARTITION p_cur CURRENT
 );
+ALTER TABLE `roles` ADD SYSTEM VERSIONING;
+-- `users` is created WITH SYSTEM VERSIONING above so `password` can be marked WITHOUT SYSTEM VERSIONING
+ALTER TABLE `user_roles` ADD SYSTEM VERSIONING;
 
 -- ----------------------------
 -- Views (drop legacy duplicates, create unified views)
